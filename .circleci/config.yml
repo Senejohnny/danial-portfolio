@@ -1,31 +1,67 @@
-version: 1
-jobs:
-  build:
-    docker:
-      - image: node:14.15.2
-
-    working_directory: ~/repo
-
-    steps:
-      - checkout
-
-      # Download and cache dependencies
-      - restore_cache:
-          keys:
-            - v1-dependencies-{{ checksum "package.json" }}
-            # fallback to using the latest cache if no exact match is found
-            - v1-dependencies-
-
-      - run: yarn install
-
-      - save_cache:
-          paths:
-            - node_modules
-          key: v1-dependencies-{{ checksum "package.json" }}
-
-      # run tests!
-      # - run: yarn test
-
-      - run: yarn build
+# version: 1
+# jobs:
+#   build:
+#     docker:
+#       - image: node:14.15.2
+#     working_directory: ~/react-portfolio
+#     steps:
+#       - checkout
+#       - restore_cache:
+#           keys:
+#             - v1-dependencies-{{ checksum "package.json" }}
+#             # fallback to using the latest cache if no exact match is found
+#             - v1-dependencies-
+#       - save_cache:
+#           paths:
+#             - node_modules
+#           key: v1-dependencies-{{ checksum "package.json" }}
+#       # run tests!
+#       # - run: yarn test
+#       - run: yarn install
+#       - run: yarn build
 
       # - run: yarn netlify:deploy
+version: 2.1
+  jobs:
+    build:
+      docker:
+        - image: circleci/node:14.15.2
+      parameters:
+        build_command:
+          description: NPM command that builds the app
+          type: string
+        build_path:
+          description: Where the built app is placed
+          type: string
+      steps:
+        - checkout
+        - attach_workspace:
+            at: app
+        - run: cd app && npm run <<parameters.build_command>>
+        - persist_to_workspace:
+            root: app
+            paths:
+              - <<parameters.build_path>>
+    deploy:
+        docker:
+          - image: circleci/python:3.7.0
+        parameters:
+          bucket_name:
+            description: The bucket where the app will be deployed to
+            type: string
+          build_path:
+            description: Where the built app is placed
+            type: string
+          distribution_id:
+            description: The distribution that serves the front-end
+            type: string
+        steps:
+          - run: pip install awscli --upgrade --user
+          - checkout
+          - attach_workspace:
+              at: app
+          - run:
+              name: Deploy to S3 and invalidate current CloudFront version
+              command: |
+                ~/.local/bin/aws s3 sync app/<<parameters.build_path>> s3://<<parameters.bucket_name>>/ --delete
+                ~/.local/bin/aws cloudfront create-invalidation --distribution-id <<parameters.distribution_id>> --paths '/*'
